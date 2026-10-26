@@ -50,6 +50,79 @@ TARGET_USER="${SUDO_USER:-root}"
 TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 TARGET_GROUP="$(id -gn "$TARGET_USER")"
 
+if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
+  C_RST=$'\e[0m'
+  C_BOLD=$'\e[1m'
+  C_DIM=$'\e[2m'
+  C_RED=$'\e[31m'
+  C_GRN=$'\e[32m'
+  C_YEL=$'\e[33m'
+  C_BLU=$'\e[34m'
+  C_CYN=$'\e[36m'
+else
+  C_RST="" C_BOLD="" C_DIM="" C_RED="" C_GRN="" C_YEL="" C_BLU="" C_CYN=""
+fi
+
+RULE="$(printf '%46s' '' | sed 's/ /─/g')"
+
+rule() {
+  printf '%s%s%s\n' "$C_DIM" "$RULE" "$C_RST"
+}
+
+clear_screen() {
+  [[ -t 1 ]] && printf '\033[H\033[2J'
+}
+
+pause() {
+  [[ -t 0 && -t 1 ]] || return 0
+  echo
+  read -r -s -p "${C_DIM}Press Enter to continue${C_RST}" _
+  echo
+}
+
+title() {
+  printf ' %s%s%s\n' "$C_BOLD$C_BLU" "$1" "$C_RST"
+}
+
+item() {
+  printf '  %s%2s)%s %s\n' "$C_CYN" "$1" "$C_RST" "$2"
+}
+
+ok() {
+  printf '%s%s%s\n' "$C_GRN" "$*" "$C_RST"
+}
+
+warn() {
+  printf '%s%s%s\n' "$C_YEL" "$*" "$C_RST"
+}
+
+err() {
+  printf '%s%s%s\n' "$C_RED" "$*" "$C_RST" >&2
+}
+
+state_color() {
+  case "$1" in
+    on|up|active|enabled|running|OK) printf '%s' "$C_GRN" ;;
+    off|down|failed|inactive|disabled|FAIL) printf '%s' "$C_RED" ;;
+    INFO) printf '%s' "$C_CYN" ;;
+    *) printf '%s' "$C_YEL" ;;
+  esac
+}
+
+badge() {
+  printf '%s● %s%s' "$(state_color "$1")" "$1" "$C_RST"
+}
+
+latency_color() {
+  if (( $1 < 800 )); then
+    printf '%s' "$C_GRN"
+  elif (( $1 < 2000 )); then
+    printf '%s' "$C_YEL"
+  else
+    printf '%s' "$C_RED"
+  fi
+}
+
 COMPS=(apt env curl wget docker git)
 APT_FILE="/etc/apt/apt.conf.d/80proxy"
 ENV_FILE="/etc/profile.d/proxy.sh"
@@ -142,12 +215,14 @@ list_configs() {
     echo "No saved configs"
     return 1
   fi
-  local i=1 f mark active
+  local i=1 f active
   active="$(active_name)"
   for f in "${CONFIGS[@]}"; do
-    mark=" "
-    [[ "$(basename "$f")" == "$active" ]] && mark="*"
-    printf '%s %2d) %s\n' "$mark" "$i" "$(remark_of "$f")"
+    if [[ "$(basename "$f")" == "$active" ]]; then
+      printf ' %s▶ %2d) %s%s\n' "$C_GRN$C_BOLD" "$i" "$(remark_of "$f")" "$C_RST"
+    else
+      printf '   %2d) %s\n' "$i" "$(remark_of "$f")"
+    fi
     i=$((i + 1))
   done
 }
@@ -223,21 +298,21 @@ EOF
 }
 
 service_failed() {
-  echo "Service failed to start" >&2
+  err "Service failed to start"
   journalctl -u "$UNIT" -n 20 --no-pager >&2
   return 1
 }
 
 svc_start() {
   if [[ ! -f $CURRENT ]]; then
-    echo "No active config. Add or select one first" >&2
+    err "No active config. Add or select one first"
     return 1
   fi
   unit_installed || write_unit || return 1
   systemctl start "$UNIT"
   sleep 1
   if unit_active; then
-    echo "Started"
+    ok "Started"
   else
     service_failed
   fi
@@ -245,23 +320,23 @@ svc_start() {
 
 svc_stop() {
   if ! unit_installed; then
-    echo "Service not installed" >&2
+    err "Service not installed"
     return 1
   fi
   systemctl stop "$UNIT"
-  echo "Stopped"
+  ok "Stopped"
 }
 
 svc_restart() {
   if [[ ! -f $CURRENT ]]; then
-    echo "No active config. Add or select one first" >&2
+    err "No active config. Add or select one first"
     return 1
   fi
   unit_installed || write_unit || return 1
   systemctl restart "$UNIT"
   sleep 1
   if unit_active; then
-    echo "Restarted"
+    ok "Restarted"
   else
     service_failed
   fi
@@ -269,21 +344,21 @@ svc_restart() {
 
 svc_enable() {
   if [[ ! -f $CURRENT ]]; then
-    echo "No active config. Add or select one first" >&2
+    err "No active config. Add or select one first"
     return 1
   fi
   unit_installed || write_unit || return 1
   systemctl enable "$UNIT" >/dev/null 2>&1
-  echo "Enabled at boot"
+  ok "Enabled at boot"
 }
 
 svc_disable() {
   if ! unit_installed; then
-    echo "Service not installed" >&2
+    err "Service not installed"
     return 1
   fi
   systemctl disable "$UNIT" >/dev/null 2>&1
-  echo "Disabled at boot"
+  ok "Disabled at boot"
 }
 
 svc_logs() {
@@ -298,17 +373,17 @@ activate() {
   local file="$1"
   write_current "$file" || return 1
   basename "$file" >"$ACTIVE_FILE"
-  echo "Active: $(remark_of "$file")"
+  ok "Active: $(remark_of "$file")"
   if unit_installed && unit_active; then
     systemctl restart "$UNIT"
     sleep 1
     if unit_active; then
-      echo "Service restarted"
+      ok "Service restarted"
     else
       service_failed
     fi
   else
-    echo "Service is not running. Start it with: xclient start"
+    warn "Service is not running. Start it with: xclient start"
   fi
 }
 
@@ -318,7 +393,7 @@ add_uris() {
   out="$("$CONV" -o "$CFG_DIR" "$@")" || true
   while IFS= read -r line; do
     [[ -f $line ]] || continue
-    echo "Saved: $(remark_of "$line")"
+    ok "Saved: $(remark_of "$line")"
     LAST_ADDED="$line"
   done <<<"$out"
   [[ -n $LAST_ADDED ]]
@@ -363,7 +438,7 @@ import_file() {
     [[ -f $line ]] || continue
     count=$((count + 1))
   done <<<"$out"
-  echo "Imported $count config(s)"
+  ok "Imported $count config(s)"
 }
 
 remove_config() {
@@ -379,7 +454,7 @@ remove_config() {
     echo "Active config removed, service stopped"
   fi
   rm -f "$PICKED"
-  echo "Deleted"
+  ok "Deleted"
 }
 
 probe_config() {
@@ -412,22 +487,22 @@ check_all() {
     return 1
   fi
   for f in "${CONFIGS[@]}"; do
-    printf '%-40s ' "$(remark_of "$f")"
+    printf '  %-40s ' "$(remark_of "$f")"
     if probe_config "$f"; then
-      echo "$PROBE_MS ms"
+      printf '%s%s ms%s\n' "$(latency_color "$PROBE_MS")" "$PROBE_MS" "$C_RST"
       if (( PROBE_MS < best_ms )); then
         best_ms=$PROBE_MS
         BEST_FILE="$f"
       fi
     else
-      echo "failed"
+      printf '%sfailed%s\n' "$C_RED" "$C_RST"
     fi
   done
   if [[ -z $BEST_FILE ]]; then
-    echo "No working config"
+    warn "No working config"
     return 1
   fi
-  echo "Fastest: $(remark_of "$BEST_FILE") ($best_ms ms)"
+  ok "Fastest: $(remark_of "$BEST_FILE") ($best_ms ms)"
   if [[ $mode == use ]]; then
     activate "$BEST_FILE"
   fi
@@ -601,12 +676,12 @@ proxy_apply() {
 
 proxy_status() {
   local c
-  echo "Proxy URL: $PROXY_URL ($(port_state "$HTTP_PORT"))"
+  printf 'Proxy URL: %s %s\n' "$PROXY_URL" "$(badge "$(port_state "$HTTP_PORT")")"
   for c in "${COMPS[@]}"; do
     if comp_available "$c"; then
-      printf '  %-7s %s\n' "$c" "$(comp_state "$c")"
+      printf '  %-7s %s\n' "$c" "$(badge "$(comp_state "$c")")"
     else
-      printf '  %-7s n/a\n' "$c"
+      printf '  %-7s %s\n' "$c" "$(badge n/a)"
     fi
   done
 }
@@ -615,7 +690,7 @@ sys_summary() {
   local c out=""
   for c in "${COMPS[@]}"; do
     if comp_available "$c"; then
-      out+="$c:$(comp_state "$c") "
+      out+="$c $(badge "$(comp_state "$c")")  "
     fi
   done
   printf '%s' "$out"
@@ -624,34 +699,39 @@ sys_summary() {
 proxy_menu() {
   local choice c i
   while true; do
+    clear_screen
     echo
-    echo "System proxy -> $PROXY_URL ($(port_state "$HTTP_PORT"))"
+    title "System proxy  $PROXY_URL $(badge "$(port_state "$HTTP_PORT")")"
+    rule
     i=1
     for c in "${COMPS[@]}"; do
       if comp_available "$c"; then
-        printf '%d) %-7s %s\n' "$i" "$c" "$(comp_state "$c")"
+        printf '  %s%d)%s %-7s %s\n' "$C_CYN" "$i" "$C_RST" "$c" "$(badge "$(comp_state "$c")")"
       else
-        printf '%d) %-7s n/a\n' "$i" "$c"
+        printf '  %s%d)%s %-7s %s\n' "$C_CYN" "$i" "$C_RST" "$c" "$(badge n/a)"
       fi
       i=$((i + 1))
     done
-    echo "a) enable all"
-    echo "d) disable all"
-    echo "0) back"
-    read -r -p "> " choice || return 0
+    rule
+    item a "Enable all"
+    item d "Disable all"
+    item 0 "Back"
+    read -r -p "${C_BOLD}> ${C_RST}" choice || return 0
     case "$choice" in
-      a) proxy_apply on ;;
-      d) proxy_apply off ;;
       0) return 0 ;;
+      a) clear_screen; proxy_apply on; pause ;;
+      d) clear_screen; proxy_apply off; pause ;;
       [1-6])
+        clear_screen
         c="${COMPS[$((choice - 1))]}"
         if [[ "$(comp_state "$c")" == on ]]; then
           proxy_apply off "$c"
         else
           proxy_apply on "$c"
         fi
+        pause
         ;;
-      *) echo "Invalid choice" ;;
+      *) echo "Invalid choice"; pause ;;
     esac
   done
 }
@@ -704,7 +784,7 @@ set_ports() {
 }
 
 report() {
-  printf '%-5s %s\n' "$1" "$2"
+  printf '%s%-5s%s %s\n' "$(state_color "$1")" "$1" "$C_RST" "$2"
 }
 
 doctor() {
@@ -773,7 +853,7 @@ do_uninstall() {
 }
 
 show_header() {
-  local state boot name
+  local state boot name active_text
   if unit_installed; then
     state="$(systemctl is-active "$UNIT" 2>/dev/null)"
     boot="$(systemctl is-enabled "$UNIT" 2>/dev/null)"
@@ -782,38 +862,46 @@ show_header() {
     boot="-"
   fi
   name="$(active_name)"
-  printf 'xclient %s\n' "$(version)"
-  printf 'Service: %s (boot: %s)\n' "$state" "$boot"
   if [[ -n $name && -f "$CFG_DIR/$name" ]]; then
-    printf 'Active:  %s\n' "$(remark_of "$CFG_DIR/$name")"
+    active_text="$C_BOLD$(remark_of "$CFG_DIR/$name")$C_RST"
   else
-    printf 'Active:  none\n'
+    active_text="${C_DIM}none${C_RST}"
   fi
-  printf 'Ports:   socks %s %s | http %s %s\n' "$SOCKS_PORT" "$(port_state "$SOCKS_PORT")" "$HTTP_PORT" "$(port_state "$HTTP_PORT")"
-  printf 'System:  %s\n' "$(sys_summary)"
+  echo
+  printf ' %s%sxclient%s %s%s%s\n' "$C_BOLD" "$C_CYN" "$C_RST" "$C_DIM" "$(version)" "$C_RST"
+  rule
+  printf ' %-8s %s   boot %s\n' "Service" "$(badge "$state")" "$(badge "$boot")"
+  printf ' %-8s %s\n' "Active" "$active_text"
+  printf ' %-8s 127.0.0.1:%-6s %s\n' "SOCKS" "$SOCKS_PORT" "$(badge "$(port_state "$SOCKS_PORT")")"
+  printf ' %-8s 127.0.0.1:%-6s %s\n' "HTTP" "$HTTP_PORT" "$(badge "$(port_state "$HTTP_PORT")")"
+  printf ' %-8s %s\n' "System" "$(sys_summary)"
+  rule
 }
 
 service_menu() {
   local choice
   while true; do
-    echo
-    echo "1) Start"
-    echo "2) Stop"
-    echo "3) Restart"
-    echo "4) Enable at boot"
-    echo "5) Disable at boot"
-    echo "6) Logs"
-    echo "0) Back"
-    read -r -p "> " choice || return 0
+    clear_screen
+    show_header
+    title "Service"
+    item 1 "Start"
+    item 2 "Stop"
+    item 3 "Restart"
+    item 4 "Enable at boot"
+    item 5 "Disable at boot"
+    item 6 "Logs"
+    rule
+    item 0 "Back"
+    read -r -p "${C_BOLD}> ${C_RST}" choice || return 0
     case "$choice" in
-      1) svc_start ;;
-      2) svc_stop ;;
-      3) svc_restart ;;
-      4) svc_enable ;;
-      5) svc_disable ;;
-      6) svc_logs ;;
+      1) clear_screen; svc_start; pause ;;
+      2) clear_screen; svc_stop; pause ;;
+      3) clear_screen; svc_restart; pause ;;
+      4) clear_screen; svc_enable; pause ;;
+      5) clear_screen; svc_disable; pause ;;
+      6) clear_screen; svc_logs; pause ;;
       0) return 0 ;;
-      *) echo "Invalid choice" ;;
+      *) echo "Invalid choice"; pause ;;
     esac
   done
 }
@@ -821,42 +909,47 @@ service_menu() {
 main_menu() {
   local choice
   while true; do
-    echo
+    clear_screen
     show_header
-    echo "-----------------------------------------"
-    echo " 1) Add config (paste URI)"
-    echo " 2) Import URIs from file"
-    echo " 3) Select config"
-    echo " 4) Remove config"
-    echo " 5) Check configs (latency)"
-    echo " 6) Service control"
-    echo " 7) System proxy (apt, env, curl, wget, docker, git)"
-    echo " 8) Test connection"
-    echo " 9) Doctor"
-    echo "10) Ports"
-    echo "11) Install service"
-    echo "12) Uninstall"
-    echo " 0) Exit"
-    read -r -p "> " choice || exit 0
+    title "Configs"
+    item 1 "Add config (paste URI)"
+    item 2 "Import URIs from file"
+    item 3 "Select config"
+    item 4 "Remove config"
+    item 5 "Check configs (latency)"
+    title "Control"
+    item 6 "Service control"
+    item 7 "System proxy (apt, env, curl, wget, docker, git)"
+    item 8 "Test connection"
+    item 9 "Doctor"
+    title "Setup"
+    item 10 "Ports"
+    item 11 "Install service"
+    item 12 "Uninstall"
+    rule
+    item 0 "Exit"
+    read -r -p "${C_BOLD}> ${C_RST}" choice || exit 0
     case "$choice" in
-      1) add_interactive ;;
-      2) import_file ;;
-      3) resolve_config && activate "$PICKED" ;;
-      4) remove_config ;;
+      0) exit 0 ;;
+      6) service_menu ;;
+      7) proxy_menu ;;
+      1) clear_screen; add_interactive; pause ;;
+      2) clear_screen; import_file; pause ;;
+      3) clear_screen; resolve_config && activate "$PICKED"; pause ;;
+      4) clear_screen; remove_config; pause ;;
       5)
+        clear_screen
         if check_all && ask_yes "Switch to the fastest?"; then
           activate "$BEST_FILE"
         fi
+        pause
         ;;
-      6) service_menu ;;
-      7) proxy_menu ;;
-      8) test_proxy ;;
-      9) doctor ;;
-      10) set_ports ;;
-      11) do_install ;;
-      12) do_uninstall ;;
-      0) exit 0 ;;
-      *) echo "Invalid choice" ;;
+      8) clear_screen; test_proxy; pause ;;
+      9) clear_screen; doctor; pause ;;
+      10) clear_screen; set_ports; pause ;;
+      11) clear_screen; do_install; pause ;;
+      12) clear_screen; do_uninstall; pause ;;
+      *) echo "Invalid choice"; pause ;;
     esac
   done
 }

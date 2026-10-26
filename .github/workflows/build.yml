@@ -3,7 +3,7 @@ name: build
 on:
   push:
     branches: [main]
-  pull_request:
+    paths: [VERSION]
   workflow_dispatch:
     inputs:
       xray_version:
@@ -43,6 +43,7 @@ jobs:
 
   build:
     needs: version
+    if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -100,7 +101,7 @@ jobs:
 
   release:
     needs: [version, build]
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.version.outputs.release == 'true'
+    if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

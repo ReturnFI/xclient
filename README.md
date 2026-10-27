@@ -23,6 +23,13 @@ Local proxy ports (changeable):
 - `curl`
 - Debian or Ubuntu for the apt proxy option (everything else works on any distro)
 
+## Easy Installation
+Run this single command to download and extract xclient, then open the installation menu:
+```
+wget https://github.com/ReturnFI/xclient/releases/latest/download/xclient-0.0.3-linux-amd64.tar.gz && tar -xzf xclient-0.0.3-linux-amd64.tar.gz && sudo mkdir -p /opt/xclient && sudo tar -xzf xclient-0.0.3-linux-amd64.tar.gz --strip-components=1 -C /opt/xclient && sudo /opt/xclient/menu.sh
+```
+
+
 ## Download
 
 Pick the latest version from the [releases page](https://github.com/ReturnFI/xclient/releases).

@@ -478,7 +478,7 @@ func buildConfig(remark string, outbound obj) obj {
 			},
 			obj{
 				"listen":   "127.0.0.1",
-				"port":     11111,
+				"port":     11112,
 				"protocol": "dokodemo-door",
 				"settings": obj{"address": "127.0.0.1"},
 				"tag":      "metrics_in",
